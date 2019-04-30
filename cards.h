@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <random>
 #include<map>
+#include <functional>
+
 
 //class for a single card
 class Card
@@ -66,6 +68,7 @@ std::ostream& operator<<(std::ostream& o, Card& c)
 		return o;
 	}
 
+
 //class for the deck
 class Deck{
 private:
@@ -96,6 +99,7 @@ public:
     
 
     Card& operator[]( int i ){ return data[i]; } 
+    Card const& operator[]( int i )const{ return data[i]; } 
 
     //iterators and reverse iterators
     auto begin()
@@ -107,6 +111,17 @@ public:
 	auto end()
 	{
 		return data.end();
+	}
+
+    auto cbegin()
+	{
+		return data.cbegin();
+	}
+
+
+	auto cend()
+	{
+		return data.cend();
 	}
 
 
@@ -121,53 +136,51 @@ public:
 		return data.rend();
 	}
 
+    auto get_gen(){
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        return gen;
+    }
+
     int separate_deck( int a, int b)
     {
-        std::random_device rd; // obtain a random number from hardware
-        std::mt19937 gen(rd()); // seed the generator
         std::uniform_int_distribution<> distr(a, b); 
-        int bias = distr(gen);        
+        int bias = distr(get_gen());        
         int NumberOfCards = static_cast<int>(data.size());
         return NumberOfCards/2 + bias;
     }
 
-    int get_rand(double efficiency)
+    std::vector<double> get_weights(double const& efficiency)
     {
         std::vector<double> weights;
         int num_of_elements;
-        if(efficiency <= 0. || efficiency > 1.){return 0;}
+        if(efficiency <= 0. || efficiency > 1.){return weights;}
         if(efficiency > 0. && efficiency <= 0.3){num_of_elements = 4;}
         if(efficiency > 0.3 && efficiency <= 0.65){num_of_elements = 3;}
         if(efficiency > 0.65 && efficiency < 1.){num_of_elements = 2;}
         if(efficiency == 1. ){num_of_elements = 1;}
         double sum = 0;
+        //auto elem = [efficiency](int i){return std::exp(-i*i*efficiency);};
         //std::cout <<num_of_elements << std::endl;
         for(int i= 0; i< num_of_elements; i++ )
         {
-            double elem = std::exp(-std::pow(i,2)*efficiency); 
+            double elem = std::exp(-i*i*efficiency); 
             sum += elem;
+           // std::exclusive_scan(data.begin(), data.end(),elem);
             weights.push_back(elem);
         }
         //normalization
         std::transform(weights.begin(), weights.end(), weights.begin(), [sum](double& x){return x/sum;});
-
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::discrete_distribution<> distr(weights.begin(), weights.end());
-        return distr(gen);
+        return weights;
     }
+
 
     auto lift()
     {
         int separate = separate_deck(-10, 10);
         int deck_size = static_cast<int>(data.size());
         //std::cout << "Lift at " << separate << std::endl;
-        while(separate < deck_size )
-        {
-            std::rotate(data.rbegin(), data.rbegin() + 1, data.rend());
-            separate += 1;
-        }
-        
+        std::rotate(data.begin(), data.begin()+separate, data.end());   
         return *this;
 
     }
@@ -187,21 +200,25 @@ public:
     Efficiency: keverés hatékonysága 0-1 közötti érték
 
     */
-    auto my_shuffle(int repeat, double efficiency)
+    auto my_shuffle(int repeat, double const& efficiency)
     {
         int deck_size = static_cast<int>(data.size());
-        int counter = 0;  
+        int counter = 0; 
+        std::vector<double> weights = get_weights(efficiency); 
         while(counter < repeat){
             int left_size = separate_deck(-3, 3);        //lapok kettéválasztása +/- 3 lapos bizonytalansággal
             int right_size =   deck_size -  left_size; 
             int which = left_size;    //which card to place where
             int where = 1;
             //std::cout << counter <<std::endl;  
-            
+          //  std::cout << "left size = " << left_size << '\t' << "right size = " << right_size << std::endl;
             while((where < left_size) && (which < deck_size))
                 { 
-                int r1 = get_rand(efficiency) + 1;      //mennyit rakunk be a jobb pakliból a bal oldaliba
-                int r2 = get_rand(efficiency) + 2;      //hány lapot ugrunk, ahova berakjuk az új lap(oka)t
+                
+                std::discrete_distribution<> distr(weights.begin(), weights.end());
+                int r1 = distr(get_gen()) + 1;      //mennyit rakunk be a jobb pakliból a bal oldaliba
+                int r2 = distr(get_gen()) + 2;      //hány lapot ugrunk, ahova berakjuk az új lap(oka)t
+               // std::cout << "r1 = " << r1 << '\t' << "r2 = " << r2 << std::endl;
                 int which_to = r1+which;
                 if(which_to > deck_size){which_to = deck_size; r1 = deck_size-which_to;}
                 std::rotate(data.begin()+where, data.begin() + which, data.begin()+which_to); 
@@ -211,11 +228,12 @@ public:
                 right_size -= r1;
                 }
                 //if cards are still  in the right half deck, put them on the top of the left deck
-                while(right_size != 0)
+                if(right_size != 0)
                     {
-                        std::rotate(data.rbegin(), data.rbegin() + 1, data.rend());
-                        right_size -= 1;
-                        left_size += 1;
+                        std::rotate(data.begin(), data.end() - right_size, data.end());
+                        right_size = 0;
+                        left_size = deck_size;
+
                     }
                 
                 counter++;
