@@ -2,10 +2,14 @@
 #include <cmath>
 #include <algorithm>
 #include <random>
-#include<map>
-#include <functional>
+#include <numeric>
+#include<functional>
 
-
+   auto get_gen = [](){
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        return gen;
+    };
 //class for a single card
 class Card
 {
@@ -73,11 +77,16 @@ std::ostream& operator<<(std::ostream& o, Card& c)
 class Deck{
 private:
         std::vector<Card> data;
+        
 
 public:
+
+    std::vector<double> seq;
+    
     //constructor for the deck
         Deck()
         {
+
             for(int i = Card::Suit::Begin_s; i < Card::Suit::End_s; ++i )
             {
                 for(int j = Card::Value::Begin; j < Card::Value::End; ++j)
@@ -91,6 +100,7 @@ public:
     Deck( Deck && )= default;
 
 
+ 
     
     int size()const
     {
@@ -136,50 +146,47 @@ public:
 		return data.rend();
 	}
 
-    auto get_gen(){
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        return gen;
-    }
-
-    int separate_deck( int a, int b)
+    template <typename F>
+    int separate_deck( int a, int b, F f)
     {
         std::uniform_int_distribution<> distr(a, b); 
-        int bias = distr(get_gen());        
+        int bias = distr(f);        
         int NumberOfCards = static_cast<int>(data.size());
         return NumberOfCards/2 + bias;
     }
 
     std::vector<double> get_weights(double const& efficiency)
     {
-        std::vector<double> weights;
+        
         int num_of_elements;
-        if(efficiency <= 0. || efficiency > 1.){return weights;}
+        int i = 0;
         if(efficiency > 0. && efficiency <= 0.3){num_of_elements = 4;}
         if(efficiency > 0.3 && efficiency <= 0.65){num_of_elements = 3;}
         if(efficiency > 0.65 && efficiency < 1.){num_of_elements = 2;}
         if(efficiency == 1. ){num_of_elements = 1;}
-        double sum = 0;
-        //auto elem = [efficiency](int i){return std::exp(-i*i*efficiency);};
-        //std::cout <<num_of_elements << std::endl;
-        for(int i= 0; i< num_of_elements; i++ )
-        {
-            double elem = std::exp(-i*i*efficiency); 
-            sum += elem;
-           // std::exclusive_scan(data.begin(), data.end(),elem);
-            weights.push_back(elem);
-        }
-        //normalization
+        std::vector<double> weights(num_of_elements);
+
+        auto elem =  [&i, &efficiency, &num_of_elements](double& fir, double& sec){ 
+        fir = std::exp(-i*i*efficiency); 
+        i++;
+        if(i == num_of_elements-1){ 
+            sec = std::exp(-i*i*efficiency);
+        } 
+        return sec;
+    };
+        //get normalized weights
+        std::exclusive_scan(weights.begin()+1, weights.end(),weights.begin(), 1., elem); 
+        double sum =std::accumulate(weights.begin(), weights.end(), 0.);
         std::transform(weights.begin(), weights.end(), weights.begin(), [sum](double& x){return x/sum;});
+        
         return weights;
     }
 
-
-    auto lift()
+    template <typename F>
+    auto lift(F f)
     {
-        int separate = separate_deck(-10, 10);
+        int separate = separate_deck(-10, 10, f);
         int deck_size = static_cast<int>(data.size());
-        //std::cout << "Lift at " << separate << std::endl;
         std::rotate(data.begin(), data.begin()+separate, data.end());   
         return *this;
 
@@ -200,25 +207,33 @@ public:
     Efficiency: keverés hatékonysága 0-1 közötti érték
 
     */
-    auto my_shuffle(int repeat, double const& efficiency)
-    {
+    template <typename F>
+    auto my_shuffle(int repeat, double const& efficiency, int row, F f)
+    { 
+        seq.resize(repeat);
         int deck_size = static_cast<int>(data.size());
         int counter = 0; 
+         
         std::vector<double> weights = get_weights(efficiency); 
+        
         while(counter < repeat){
-            int left_size = separate_deck(-3, 3);        //lapok kettéválasztása +/- 3 lapos bizonytalansággal
+            int left_size = separate_deck(-3, 3, f);        //lapok kettéválasztása +/- 3 lapos bizonytalansággal
             int right_size =   deck_size -  left_size; 
             int which = left_size;    //which card to place where
             int where = 1;
-            //std::cout << counter <<std::endl;  
-          //  std::cout << "left size = " << left_size << '\t' << "right size = " << right_size << std::endl;
+
             while((where < left_size) && (which < deck_size))
                 { 
-                
-                std::discrete_distribution<> distr(weights.begin(), weights.end());
-                int r1 = distr(get_gen()) + 1;      //mennyit rakunk be a jobb pakliból a bal oldaliba
-                int r2 = distr(get_gen()) + 2;      //hány lapot ugrunk, ahova berakjuk az új lap(oka)t
-               // std::cout << "r1 = " << r1 << '\t' << "r2 = " << r2 << std::endl;
+                int r1,r2;
+                if(static_cast<int>(weights.size()) > 1)
+                {
+                    std::discrete_distribution<> distr(weights.begin(), weights.end());
+                    r1 = distr(f) + 1;      //mennyit rakunk be a jobb pakliból a bal oldaliba
+                    r2 = distr(f) + 2;      //hány lapot ugrunk, ahova berakjuk az új lap(oka)t
+                }else{
+                    r1 = 1;
+                    r2 = 2;
+                }
                 int which_to = r1+which;
                 if(which_to > deck_size){which_to = deck_size; r1 = deck_size-which_to;}
                 std::rotate(data.begin()+where, data.begin() + which, data.begin()+which_to); 
@@ -235,11 +250,49 @@ public:
                         left_size = deck_size;
 
                     }
-                
+                if(row > 0)
+                {
+                    seq[counter] = analyze(row);
+                }
                 counter++;
             }
         return *this;
             
+    }
+        int analyze(int number)
+    {
+        int counter = 1;        //count same coloured cards
+        int row = 0;            //count sequences
+        int card = 1;           //count cards to avoid neglecting the last row
+        
+        auto f = [&counter, &row, &number, &card](auto& x, auto& y){
+        if(x.get_suit() == y.get_suit()){counter++;}
+        else{
+            if(counter == number){row ++;}
+            counter = 1;}
+        card++;
+        if(card == 52 && counter == number){row ++;}
+        return y;
+        };
+
+        std::accumulate(data.begin()+1, data.end(), data[0], f);
+       
+        return row;
+        
+    }
+
+        bool four_kings()
+    {
+        int counter = 1;
+        bool kings = false;
+        auto f = [&counter](auto& x, auto& y){if(x.get_value() == 11 && y.get_value() == 11) {counter++;} return y;};
+        std::accumulate(data.begin()+1, data.end(), data[0], f);
+        if(counter == 4)
+        {   
+           kings = true;
+        }
+        
+        return kings;
     }
 
 };
@@ -253,59 +306,13 @@ public:
         return o;
     }
     //is there a row with 3 cards from the same color?
-    std::vector<int> analyze(Deck d)
-    {
-        int i = 0;
-        std::vector<int> seq(12);
-        while(i <d.size())
-        {
-            auto temp = d[i].get_suit();
-            int counter = 1;
-            bool row = true;
 
-            while(row == true && i+counter < d.size())
-            {
-                if(temp == d[i+counter].get_suit()){counter ++;}
-                else{row = false;}
-            }
-            if(counter >1)
-            {  
-                seq[counter-1]++;
-            }
-            i = i+counter;
 
-      
-        }
-        return seq;
-        
-    }
 
-    int four_kings(Deck d)
-    {
-        bool loop = true;
-        int i = 0;
-        int kings = 1;
-        while(loop == true)
-        {
-            auto temp = d[i].get_value();
-            if(temp == 11)
-            {
-                int n = 1;             
-                //std::cout << d[i] << std::endl;
-                while(d[i+n].get_value() == temp )
-                {
-                  //  std::cout << d[i+n] << std::endl; 
-                    n++;
-                    kings ++;
-                }
-                loop = false;               
-            }
-            i++;
-        }
+  
 
-        
-        return kings;
-    }
+
+
 
 
 
